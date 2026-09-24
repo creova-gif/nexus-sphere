@@ -4,15 +4,19 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import com.nexussphere.app.auth.AuthScreen
+import com.nexussphere.app.portfolio.PortfolioViewModel
+import com.nexussphere.app.portfolio.PositionsScreen
 
-/** Top-level navigation destinations. Phase 1: shell only. */
+/** Top-level navigation destinations. */
 enum class Screen(val label: String) {
     DASHBOARD("Dashboard"),
-    SCANNER("Scanner"),
     POSITIONS("Positions"),
+    SCANNER("Scanner"),
     RESEARCH("Research"),
 }
 
@@ -29,9 +33,16 @@ object NexusTheme {
     val textMuted   = Color(0xFF6B7FA3)
 }
 
+/** Session credentials — in-memory only for Phase 2. Phase 3 moves to secure storage. */
+data class SessionCreds(val userId: String, val userSecret: String)
+
 @Composable
 fun NexusSphereApp() {
-    var currentScreen by remember { mutableStateOf(Screen.DASHBOARD) }
+    var screen  by remember { mutableStateOf(Screen.DASHBOARD) }
+    var creds   by remember { mutableStateOf<SessionCreds?>(null) }
+    var showAuth by remember { mutableStateOf(false) }
+
+    val portfolioVm = remember { PortfolioViewModel() }
 
     MaterialTheme(
         colorScheme = darkColorScheme(
@@ -42,23 +53,36 @@ fun NexusSphereApp() {
             onSurface    = NexusTheme.text,
         )
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(NexusTheme.background)
-        ) {
-            NexusTopBar(currentScreen)
-            Row(modifier = Modifier.fillMaxSize()) {
-                NexusSideNav(
-                    current  = currentScreen,
-                    onSelect = { currentScreen = it },
+        Box(modifier = Modifier.fillMaxSize().background(NexusTheme.background)) {
+            if (showAuth) {
+                AuthScreen(
+                    onConnected = { uid, sec ->
+                        creds    = SessionCreds(uid, sec)
+                        showAuth = false
+                        portfolioVm.load(uid, sec)
+                    },
+                    onDemoMode = {
+                        showAuth = false
+                        portfolioVm.load()
+                    },
                 )
-                Box(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-                    when (currentScreen) {
-                        Screen.DASHBOARD  -> DashboardScreen()
-                        Screen.SCANNER    -> ScannerScreen()
-                        Screen.POSITIONS  -> PositionsScreen()
-                        Screen.RESEARCH   -> ResearchScreen()
+            } else {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    NexusTopBar(screen, creds, onConnectClick = { showAuth = true })
+                    Row(modifier = Modifier.fillMaxSize()) {
+                        NexusSideNav(current = screen, onSelect = { screen = it })
+                        Box(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+                            when (screen) {
+                                Screen.DASHBOARD -> DashboardScreen(onGoToPositions = { screen = Screen.POSITIONS })
+                                Screen.POSITIONS -> PositionsScreen(
+                                    viewModel    = portfolioVm,
+                                    userId       = creds?.userId ?: "",
+                                    userSecret   = creds?.userSecret ?: "",
+                                )
+                                Screen.SCANNER   -> ScannerScreen()
+                                Screen.RESEARCH  -> ResearchScreen()
+                            }
+                        }
                     }
                 }
             }
@@ -67,67 +91,95 @@ fun NexusSphereApp() {
 }
 
 @Composable
-private fun NexusTopBar(screen: Screen) {
+private fun NexusTopBar(screen: Screen, creds: SessionCreds?, onConnectClick: () -> Unit) {
     Surface(color = NexusTheme.surface, shadowElevation = 4.dp) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
+            modifier              = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment     = Alignment.CenterVertically,
         ) {
             Text("NEXUS SPHERE", color = NexusTheme.accent, style = MaterialTheme.typography.titleMedium)
-            Text(screen.label, color = NexusTheme.textMuted, style = MaterialTheme.typography.bodyMedium)
-        }
-    }
-}
-
-@Composable
-private fun NexusSideNav(current: Screen, onSelect: (Screen) -> Unit) {
-    Surface(
-        color     = NexusTheme.surfaceAlt,
-        modifier  = Modifier.width(180.dp).fillMaxHeight(),
-        shadowElevation = 2.dp,
-    ) {
-        Column(modifier = Modifier.padding(8.dp)) {
-            Screen.entries.forEach { screen ->
-                val selected = screen == current
-                TextButton(
-                    onClick  = { onSelect(screen) },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors   = ButtonDefaults.textButtonColors(
-                        contentColor = if (selected) NexusTheme.accent else NexusTheme.textMuted
-                    ),
-                ) {
-                    Text(screen.label)
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment     = Alignment.CenterVertically,
+            ) {
+                Text(screen.label, color = NexusTheme.textMuted, style = MaterialTheme.typography.bodyMedium)
+                if (creds == null) {
+                    TextButton(onClick = onConnectClick) {
+                        Text("Connect Broker", color = NexusTheme.accent, style = MaterialTheme.typography.labelMedium)
+                    }
+                } else {
+                    ConnectedPill()
                 }
             }
         }
     }
 }
 
-// ── Phase 1 placeholder screens ──────────────────────────────────────────────
-
 @Composable
-fun DashboardScreen() {
-    PlaceholderScreen("Dashboard — portfolio summary coming in Phase 2")
+private fun ConnectedPill() {
+    Surface(
+        color = NexusTheme.profit.copy(alpha = 0.15f),
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(6.dp),
+    ) {
+        Text(
+            text     = "● LIVE",
+            color    = NexusTheme.profit,
+            style    = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+        )
+    }
 }
 
 @Composable
-fun ScannerScreen() {
-    PlaceholderScreen("Signal Scanner — live market data coming in Phase 3")
+private fun NexusSideNav(current: Screen, onSelect: (Screen) -> Unit) {
+    Surface(
+        color    = NexusTheme.surfaceAlt,
+        modifier = Modifier.width(180.dp).fillMaxHeight(),
+        shadowElevation = 2.dp,
+    ) {
+        Column(modifier = Modifier.padding(8.dp)) {
+            Screen.entries.forEach { s ->
+                val selected = s == current
+                TextButton(
+                    onClick  = { onSelect(s) },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors   = ButtonDefaults.textButtonColors(
+                        contentColor = if (selected) NexusTheme.accent else NexusTheme.textMuted,
+                    ),
+                ) { Text(s.label) }
+            }
+        }
+    }
+}
+
+// ── Screens ──────────────────────────────────────────────────────────────────
+
+@Composable
+fun DashboardScreen(onGoToPositions: () -> Unit) {
+    Column(
+        modifier            = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text("Dashboard", color = NexusTheme.text, style = MaterialTheme.typography.headlineSmall)
+        Spacer(modifier = Modifier.height(12.dp))
+        TextButton(onClick = onGoToPositions) {
+            Text("View Positions →", color = NexusTheme.accent)
+        }
+        Text("Full dashboard coming in Phase 3 (live market data)", color = NexusTheme.textMuted)
+    }
 }
 
 @Composable
-fun PositionsScreen() {
-    PlaceholderScreen("Positions — SnapTrade integration coming in Phase 2")
-}
+fun ScannerScreen() = PlaceholderScreen("Signal Scanner — live market data in Phase 3")
 
 @Composable
-fun ResearchScreen() {
-    PlaceholderScreen("Research OS — hypothesis tracking coming in Phase 6")
-}
+fun ResearchScreen() = PlaceholderScreen("Research OS — hypothesis tracking in Phase 6")
 
 @Composable
 private fun PlaceholderScreen(message: String) {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Text(message, color = NexusTheme.textMuted, style = MaterialTheme.typography.bodyLarge)
     }
 }
