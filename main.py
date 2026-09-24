@@ -1,6 +1,7 @@
 from flask import Flask, make_response, request, jsonify
 import os
 import logging
+from guardrails import order_guard as _order_guard_fn, MAX_ORDER_CAD as _MAX_CAD
 
 # ── Lazy AI client imports ─────────────────────────────────────────────────────
 _openai_client = None
@@ -28,6 +29,10 @@ def _get_anthropic():
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
+
+def _order_guard(units, price, action):
+    """Wrapper around guardrails.order_guard using module-level env constants."""
+    _order_guard_fn(units, price, action)
 
 app = Flask(__name__)
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
@@ -275,8 +280,10 @@ def snap_order_impact():
     price = data.get('price')
     tif = data.get('timeInForce', 'Day')
 
-    if units and float(units) <= 0:
-        return jsonify({'error': 'Units must be positive'}), 400
+    try:
+        _order_guard(units, price, action)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
 
     try:
         kwargs = dict(
@@ -332,8 +339,10 @@ def snap_order_force():
     price = data.get('price')
     tif = data.get('timeInForce', 'Day')
 
-    if units and float(units) <= 0:
-        return jsonify({'error': 'Units must be positive'}), 400
+    try:
+        _order_guard(units, price, action)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
 
     try:
         kwargs = dict(
@@ -350,6 +359,12 @@ def snap_order_force():
         return jsonify(resp.body)
     except Exception as e:
         return snap_err(e)
+
+@app.route('/api/snap/kill-switch', methods=['GET'])
+def snap_kill_switch_status():
+    """Return current kill-switch and order-cap state for the UI."""
+    from guardrails import KILL_SWITCH as _KS, MAX_ORDER_CAD as _CAP
+    return jsonify({'killSwitch': _KS, 'maxOrderCAD': _CAP})
 
 @app.route('/api/snap/order/cancel', methods=['POST'])
 def snap_order_cancel():

@@ -1,8 +1,8 @@
 [project]
-name = "python-template"
-version = "0.1.0"
-description = ""
-authors = ["Your Name <you@example.com>"]
+name = "nexussphere"
+version = "1.0.0"
+description = "NexusSphere — intelligence operating system for capital allocation"
+authors = ["Creova <creativeinnovationspace@gmail.com>"]
 requires-python = ">=3.11"
 dependencies = [
     "anthropic>=0.85.0",
