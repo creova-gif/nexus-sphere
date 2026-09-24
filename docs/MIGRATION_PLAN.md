@@ -30,7 +30,7 @@ No phase is complete until its tests pass and the replaced subsystem is deprecat
 
 ---
 
-## Phase 2 — Portfolio Read-Only Screens
+## Phase 2 — Portfolio Read-Only Screens ✅
 
 **Goal:** Replace the positions/holdings tab in the HTML frontend with a native KMP screen.
 
@@ -45,15 +45,19 @@ No phase is complete until its tests pass and the replaced subsystem is deprecat
 
 ---
 
-## Phase 3 — Market Data
+## Phase 3 — Market Data ✅
 
 **Goal:** Replace seeded pseudo-random prices with a real market data feed.
 
 **Work items:**
-- Evaluate data provider (Alpaca, Polygon.io, Yahoo Finance unofficial)
-- `MarketDataRepository` interface + Ktor client implementation
-- Wire real prices into `SignalScore.evaluate()`
-- Replace demo `MarketSnapshot` generation
+- `TechnicalIndicators.kt` — RSI, EMA, MACD, SMA (Kotlin, platform-agnostic)
+- `YahooFinanceDto.kt` — chart + quote API response DTOs
+- `MarketDataApiClient.kt` — Yahoo Finance unofficial API via Ktor (no key required)
+- `MarketDataRepository` interface + `DemoMarketDataRepository` + `MarketDataRepositoryImpl`
+- `ScannerViewModel.kt` — scores all 8 TFSA holdings, sorted by signal strength
+- `ScannerScreen.kt` — score bar with profit-gate marker, component breakdown, direction chip
+- Wired into `App.kt` — replaces placeholder scanner screen
+- Tests: `TechnicalIndicatorsTest`, `DemoMarketDataRepositoryTest`
 
 **Dependencies:** Phase 2 complete
 

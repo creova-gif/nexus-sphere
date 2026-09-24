@@ -11,6 +11,8 @@ import androidx.compose.ui.unit.dp
 import com.nexussphere.app.auth.AuthScreen
 import com.nexussphere.app.portfolio.PortfolioViewModel
 import com.nexussphere.app.portfolio.PositionsScreen
+import com.nexussphere.app.scanner.ScannerScreen
+import com.nexussphere.app.scanner.ScannerViewModel
 
 /** Top-level navigation destinations. */
 enum class Screen(val label: String) {
@@ -43,6 +45,7 @@ fun NexusSphereApp() {
     var showAuth by remember { mutableStateOf(false) }
 
     val portfolioVm = remember { PortfolioViewModel() }
+    val scannerVm   = remember { ScannerViewModel() }
 
     MaterialTheme(
         colorScheme = darkColorScheme(
@@ -79,7 +82,7 @@ fun NexusSphereApp() {
                                     userId       = creds?.userId ?: "",
                                     userSecret   = creds?.userSecret ?: "",
                                 )
-                                Screen.SCANNER   -> ScannerScreen()
+                                Screen.SCANNER   -> ScannerScreen(viewModel = scannerVm)
                                 Screen.RESEARCH  -> ResearchScreen()
                             }
                         }
@@ -170,9 +173,6 @@ fun DashboardScreen(onGoToPositions: () -> Unit) {
         Text("Full dashboard coming in Phase 3 (live market data)", color = NexusTheme.textMuted)
     }
 }
-
-@Composable
-fun ScannerScreen() = PlaceholderScreen("Signal Scanner — live market data in Phase 3")
 
 @Composable
 fun ResearchScreen() = PlaceholderScreen("Research OS — hypothesis tracking in Phase 6")
