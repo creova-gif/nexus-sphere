@@ -299,6 +299,7 @@ class ApiSecurityTests(unittest.TestCase):
         self.assertEqual(self.anthropic.messages.create.call_count, 1)
 
     def test_rate_limiter_isolates_user_buckets(self):
+        os.environ.pop('AI_RATE_LIMIT', None)
         limiter = SlidingWindowRateLimiter(limit=1, window_seconds=60)
         self.assertTrue(limiter.allow('user-a')[0])
         self.assertFalse(limiter.allow('user-a')[0])
