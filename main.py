@@ -2,6 +2,13 @@ from flask import Flask, make_response, request, jsonify
 import os
 import logging
 
+from security_controls import (
+    clamp_max_tokens,
+    guard_sensitive_request,
+    normalize_equity_action,
+    redact_secrets,
+)
+
 # ── Lazy AI client imports ─────────────────────────────────────────────────────
 _openai_client = None
 _anthropic_client = None
@@ -31,6 +38,11 @@ log = logging.getLogger(__name__)
 
 app = Flask(__name__)
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
+
+
+@app.before_request
+def _enforce_api_guards():
+    return guard_sensitive_request()
 
 # ── Lazy SnapTrade import ─────────────────────────────────────────────────────
 # snaptrade_client takes ~6 seconds to import. We defer it until the first API
@@ -70,11 +82,11 @@ def nocache_file(path):
 
 def snap_err(e):
     st = _get_st()
-    log.error(f"SnapTrade error: {e}")
+    log.error("SnapTrade error: %s", redact_secrets(e))
     if isinstance(e, st.ApiException):
-        body = e.body if isinstance(e.body, dict) else {'error': str(e.body)[:300]}
+        body = e.body if isinstance(e.body, dict) else {'error': redact_secrets(e.body)[:300]}
         return jsonify(body), e.status
-    return jsonify({'error': str(e)[:300]}), 500
+    return jsonify({'error': redact_secrets(e)[:300]}), 500
 
 # ── App routes ────────────────────────────────────────────────────────────────
 
@@ -237,22 +249,25 @@ def snap_symbols():
 @app.route('/api/snap/order/impact', methods=['POST'])
 def snap_order_impact():
     """Preview an order — returns estimated cost, units, trade_id for confirmation."""
-    client = get_snap_client()
-    if not client:
-        return jsonify({'error': 'SnapTrade not configured'}), 503
     data = request.get_json(silent=True) or {}
     uid = data.get('userId', '').strip()
     usec = data.get('userSecret', '').strip()
     acct_id = data.get('accountId', '').strip()
-    action = data.get('action', 'BUY')
+    action = normalize_equity_action(data.get('action', 'BUY'))
     order_type = data.get('orderType', 'Market')
     symbol_id = data.get('symbolId', '').strip()
     units = data.get('units')
     price = data.get('price')
     tif = data.get('timeInForce', 'Day')
 
-    if units and float(units) <= 0:
+    if action is None:
+        return jsonify({'error': 'action must be BUY or SELL'}), 400
+    if units is not None and units != '' and float(units) <= 0:
         return jsonify({'error': 'Units must be positive'}), 400
+
+    client = get_snap_client()
+    if not client:
+        return jsonify({'error': 'SnapTrade not configured'}), 503
 
     try:
         kwargs = dict(
@@ -264,6 +279,7 @@ def snap_order_impact():
         )
         if price:
             kwargs['price'] = float(price)
+        log.info("Order preview requested: %s %s by %s", action, symbol_id, uid)
         resp = client.trading.get_order_impact(**kwargs)
         return jsonify(resp.body)
     except Exception as e:
@@ -272,15 +288,15 @@ def snap_order_impact():
 @app.route('/api/snap/order/place', methods=['POST'])
 def snap_order_place():
     """Confirm and place a previewed order using trade_id."""
-    client = get_snap_client()
-    if not client:
-        return jsonify({'error': 'SnapTrade not configured'}), 503
     data = request.get_json(silent=True) or {}
     uid = data.get('userId', '').strip()
     usec = data.get('userSecret', '').strip()
     trade_id = data.get('tradeId', '').strip()
     if not trade_id:
         return jsonify({'error': 'tradeId required'}), 400
+    client = get_snap_client()
+    if not client:
+        return jsonify({'error': 'SnapTrade not configured'}), 503
     try:
         resp = client.trading.place_order(
             user_id=uid, user_secret=usec,
@@ -293,39 +309,11 @@ def snap_order_place():
 
 @app.route('/api/snap/order/force', methods=['POST'])
 def snap_order_force():
-    """Place an order directly without preview (market orders only)."""
-    client = get_snap_client()
-    if not client:
-        return jsonify({'error': 'SnapTrade not configured'}), 503
-    data = request.get_json(silent=True) or {}
-    uid = data.get('userId', '').strip()
-    usec = data.get('userSecret', '').strip()
-    acct_id = data.get('accountId', '').strip()
-    action = data.get('action', 'BUY')
-    order_type = data.get('orderType', 'Market')
-    symbol_id = data.get('symbolId', '').strip()
-    units = data.get('units')
-    price = data.get('price')
-    tif = data.get('timeInForce', 'Day')
-
-    if units and float(units) <= 0:
-        return jsonify({'error': 'Units must be positive'}), 400
-
-    try:
-        kwargs = dict(
-            user_id=uid, user_secret=usec,
-            account_id=acct_id, action=action,
-            order_type=order_type, time_in_force=tif,
-            universal_symbol_id=symbol_id,
-            units=float(units) if units else None,
-        )
-        if price:
-            kwargs['price'] = float(price)
-        resp = client.trading.place_force_order(**kwargs)
-        log.info(f"Force order placed: {action} {symbol_id} {units} by {uid}")
-        return jsonify(resp.body)
-    except Exception as e:
-        return snap_err(e)
+    """Disabled. This path submitted brokerage orders without a preview."""
+    log.warning("Rejected force-order attempt; preview is required")
+    return jsonify({
+        'error': 'Force orders are disabled. Preview the order with /api/snap/order/impact, then place it with /api/snap/order/place.'
+    }), 403
 
 @app.route('/api/snap/order/cancel', methods=['POST'])
 def snap_order_cancel():
@@ -398,7 +386,7 @@ def ai_claude():
     """Proxy Claude (Anthropic) requests through Replit AI Integration."""
     data = request.get_json(silent=True) or {}
     messages = data.get('messages', [])
-    max_tokens = int(data.get('max_tokens', 800))
+    max_tokens = clamp_max_tokens(data.get('max_tokens', 800))
     system_msg = data.get('system', '')
 
     if not messages:
@@ -429,8 +417,8 @@ def ai_claude():
             }
         })
     except Exception as e:
-        log.error(f"Claude API error: {e}")
-        return jsonify({'error': str(e)[:500]}), 500
+        log.error("Claude API error: %s", redact_secrets(type(e).__name__))
+        return jsonify({'error': 'AI request failed'}), 500
 
 
 @app.route('/api/ai/openai', methods=['POST'])
@@ -438,7 +426,7 @@ def ai_openai():
     """Proxy OpenAI requests through Replit AI Integration."""
     data = request.get_json(silent=True) or {}
     messages = data.get('messages', [])
-    max_tokens = int(data.get('max_tokens', 800))
+    max_tokens = clamp_max_tokens(data.get('max_tokens', 800))
     system_msg = data.get('system', '')
 
     if not messages:
@@ -467,8 +455,8 @@ def ai_openai():
             }
         })
     except Exception as e:
-        log.error(f"OpenAI API error: {e}")
-        return jsonify({'error': str(e)[:500]}), 500
+        log.error("OpenAI API error: %s", redact_secrets(type(e).__name__))
+        return jsonify({'error': 'AI request failed'}), 500
 
 
 @app.route('/api/ai/news-summary', methods=['POST'])
@@ -502,8 +490,8 @@ def ai_news_summary():
         parsed = json.loads(text)
         return jsonify({'success': True, 'data': parsed})
     except Exception as e:
-        log.error(f"News summary error: {e}")
-        return jsonify({'error': str(e)[:500]}), 500
+        log.error("News summary error: %s", redact_secrets(type(e).__name__))
+        return jsonify({'error': 'AI request failed'}), 500
 
 
 if __name__ == '__main__':
