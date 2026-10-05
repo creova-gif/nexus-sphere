@@ -76,6 +76,10 @@ uv sync
 |---|---|---|
 | `SNAPTRADE_CLIENT_ID` | For live brokerage data | Correctly read via `os.environ.get()` — never hardcode this |
 | `SNAPTRADE_CONSUMER_KEY` | For live brokerage data | Same — env var only |
+| `NEXUS_API_TOKEN` | For AI and trade routes | Bearer token checked with `Authorization: Bearer`. AI proxy and order routes fail closed when this is unset. |
+| `AI_RATE_LIMIT` | No | AI requests per authenticated user per window. Default 30. |
+| `AI_RATE_WINDOW_SECONDS` | No | Rate-limit window. Default 60. |
+| `AI_MAX_TOKENS_CEILING` | No | Upper bound for AI proxy `max_tokens`. Default 2048. |
 
 ### Running locally
 

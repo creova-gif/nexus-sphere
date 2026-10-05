@@ -28,7 +28,7 @@ Both OpenAI and Anthropic (Claude) are connected via Replit AI Integrations — 
 | `/api/ai/openai` | POST | Proxy to GPT-4o — same body format, same response shape |
 | `/api/ai/news-summary` | POST | Summarize headlines for a symbol; returns `{summary, sentiment, confidence}` |
 
-All frontend calls route through these proxies. The following functions call `/api/ai/claude`:
+All three AI routes require `Authorization: Bearer $NEXUS_API_TOKEN` and share a per-user rate limit. All frontend calls route through these proxies. The following functions call `/api/ai/claude`:
 - `pmCallClaudeForProbability()` — prediction market probability engine
 - PM research pipeline — market research brief generator
 - `aiChatWithClaude()` — trade journal AI coach
@@ -50,17 +50,21 @@ Requires two environment secrets: `SNAPTRADE_CLIENT_ID` and `SNAPTRADE_CONSUMER_
 | `/api/snap/activities` | GET | Get transaction history |
 | `/api/snap/symbols` | GET | Symbol search (exchanges: NASDAQ/NYSE/TSX/ARCA) |
 | `/api/snap/quote` | GET | Real-time quotes |
-| `/api/snap/order/impact` | POST | Preview order (returns trade_id + estimated cost) |
-| `/api/snap/order/place` | POST | Confirm order using trade_id |
-| `/api/snap/order/force` | POST | Direct order without preview |
-| `/api/snap/order/cancel` | POST | Cancel open order |
-| `/api/snap/orders` | GET | List orders by state |
+| `/api/snap/order/impact` | POST | Preview order (returns trade_id + estimated cost). Requires bearer auth. |
+| `/api/snap/order/place` | POST | Confirm order using trade_id. Requires bearer auth. |
+| `/api/snap/order/force` | POST | Disabled. Returns 403 and does not call the brokerage. |
+| `/api/snap/order/cancel` | POST | Cancel open order. Requires bearer auth. |
+| `/api/snap/orders` | GET | List orders by state. Requires bearer auth. |
 
-### Trading guardrails enforced:
-- Max $2,000 CAD per order
-- BUY and SELL only (no shorting)
-- Preview required before every real order
-- Max 30% portfolio concentration per security
+### Trading and AI guardrails enforced in the server:
+- `Authorization: Bearer $NEXUS_API_TOKEN` required on `/api/ai/*` and on order preview, place, cancel, force, and order list. Requests fail closed when the token is unset.
+- Per-authenticated-user rate limit on `/api/ai/*` (`AI_RATE_LIMIT` per `AI_RATE_WINDOW_SECONDS`, default 30 per 60 seconds).
+- `/api/snap/order/force` is disabled and cannot skip preview.
+- Preview `tradeId` is required to place an order.
+- Equity preview actions are BUY and SELL only.
+- AI `max_tokens` is clamped (`AI_MAX_TOKENS_CEILING`, default 2048).
+
+The $2,000 CAD per-order cap and 30% concentration cap are not enforced in code.
 
 ## Features
 
